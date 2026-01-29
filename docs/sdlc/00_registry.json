@@ -1,0 +1,14 @@
+{
+  "registryId": "tt-metal.sdlc-processes",
+  "version": "0.1.0",
+  "processes": [
+    {
+      "sdlcId": "sdlc.main",
+      "slug": "main",
+      "path": "docs/sdlc/00_Main/",
+      "goal": "Основной SDLC: status, ideas, BA, architecture (в т.ч. Doc–MLIR–GraphDB pipeline), specs, QA, operations.",
+      "goalShort": "Основной SDLC (00_Main).",
+      "domainTags": ["main", "status", "ba", "architecture", "specs", "qa", "operations", "mlir", "graphdb"]
+    }
+  ]
+}
