@@ -6,7 +6,7 @@
 |---------|------------|
 | `ttm.sdlc_doc` | Документ-как-структура: секции, абзацы, требования; источник для doc ↔ MLIR bidirectional и для генерации текста LLM. |
 
-Файлы этого слоя: под `Artifacts/mlir/` с префиксом `doc_*.mlir` или `sdlc_doc_*.mlir`.
+Файлы этого слоя: канонический путь — `.cursor/artifacts_mlir_graphdb/mlir/` (префикс `doc_*.mlir` или `sdlc_doc_*.mlir`). Этот README — дубликат реестра; основной SoT диалектов и трансформаций: `.cursor/artifacts_mlir_graphdb/mlir/README.md`.
 
 ## Трансформации
 

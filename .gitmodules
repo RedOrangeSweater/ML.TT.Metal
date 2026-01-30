@@ -13,4 +13,4 @@
 [submodule "tt_metal/third_party/tt_llk"]
 	path = tt_metal/third_party/tt_llk
 	url = https://github.com/tenstorrent/tt-llk.git
-	branch = main
+	branch = shutov/feat/docs_rules
