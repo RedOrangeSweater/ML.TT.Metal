@@ -21,4 +21,4 @@
 
 ### Next step
 
-При реализации — оформить `docs/06_Development/TASK_*.md`, при необходимости `docs/sdlc/00_Main/00_Status/01_Kanban.md`.
+При реализации — оформить `docs/06_Development/TASK_*.md`, при необходимости tt-lang `docs/sdlc/01_tt_metal/00_Status/01_Kanban.md`.

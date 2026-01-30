@@ -16,7 +16,7 @@
 
 ### Output
 
-- **Scope**; **Findings** (🔴/🟡/🟢); **Группы правок (diff-surface)**; **Предложения по правилам**; **Экспорт в SDLC** (TASK в `docs/sdlc/00_Main/00_Status/`, план в месяцах).
+- **Scope**; **Findings** (🔴/🟡/🟢); **Группы правок (diff-surface)**; **Предложения по правилам**; **Экспорт в SDLC** (TASK в tt-lang `docs/sdlc/01_tt_metal/00_Status/`, план в месяцах).
 
 ### Constraints
 

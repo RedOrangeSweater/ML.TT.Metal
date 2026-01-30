@@ -5,9 +5,9 @@
     {
       "sdlcId": "sdlc.main",
       "slug": "main",
-      "path": "docs/sdlc/00_Main/",
-      "goal": "Основной SDLC: status, ideas, BA, architecture (в т.ч. Doc–MLIR–GraphDB pipeline), specs, QA, operations.",
-      "goalShort": "Основной SDLC (00_Main).",
+      "path": "tt-lang:docs/sdlc/01_tt_metal/",
+      "goal": "SDLC tt-metal ведётся в репо tt-lang: status, ideas, BA, architecture (в т.ч. Doc–MLIR–GraphDB pipeline), specs, QA, operations.",
+      "goalShort": "SDLC tt-metal (canonical in tt-lang).",
       "domainTags": ["main", "status", "ba", "architecture", "specs", "qa", "operations", "mlir", "graphdb"]
     }
   ]

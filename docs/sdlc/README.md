@@ -1,7 +1,8 @@
-# SDLC этого репо (tt-metal)
+# SDLC (tt-metal)
 
-- **`docs/sdlc/00_Main/`** — основной SDLC (status, ideas, BA, architecture, specs, QA, operations).
-- Ключевой документ по дисциплине документации и пайплайну: [00_Main/02_Architecture/00_Doc_MLIR_GraphDB_Pipeline.md](00_Main/02_Architecture/00_Doc_MLIR_GraphDB_Pipeline.md).
-- Канонический SDLC tt_llk (LLK): [tt_metal/third_party/tt_llk/docs/sdlc/00_Main/](../../tt_metal/third_party/tt_llk/docs/sdlc/00_Main/) (в этом репо).
+SDLC tt-metal ведётся в репо **tt-lang**: см. tt-lang `docs/sdlc/01_tt_metal/`.
 
-**Реестр**: [00_registry.json](00_registry.json).
+- Статус и навигация: tt-lang `docs/sdlc/01_tt_metal/00_Status/00_projects_graph.md`.
+- Пайплайн Doc–MLIR–GraphDB: tt-lang `docs/sdlc/01_tt_metal/02_Architecture/00_Doc_MLIR_GraphDB_Pipeline.md`.
+
+**Реестр**: [00_registry.json](00_registry.json) (canonical path — в tt-lang).
