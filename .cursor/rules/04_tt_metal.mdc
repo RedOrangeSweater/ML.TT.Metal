@@ -12,7 +12,6 @@ alwaysApply: true
 
 ## Constraints
 
-- **SDLC and status** for tt-metal are maintained in the tt-lang repo: `docs/sdlc/01_tt_metal/`. In this repo, `docs/sdlc/` contains only a stub pointing to tt-lang.
 - Do not refactor or edit non-Cursor agent config files (e.g. `CLAUDE.md`, `AGENTS.md`) unless explicitly requested.
 - Prefer one-click runnable flows via `.vscode/launch.json` / `.vscode/tasks.json` when introducing new workflows.
 - Keep changes small and avoid broad churn across the repo.
