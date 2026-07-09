@@ -6,9 +6,9 @@ run-name: "ttnn-shutov from-source (${{ inputs.publish_target }})"
 #
 # Does NOT use Tenstorrent harbor / tt-ubuntu-* runners (unavailable on this fork).
 # auditwheel repair is DISABLED: on this pin it corrupts ELF (.init/.plt in
-# non-exec LOAD) and import ttnn SIGSEGV. Build stays inside the manylinux
-# image; platform tag is retagged to manylinux_2_34_x86_64 after a green
-# in-container smoke (retag != auditwheel).
+# non-exec LOAD) and import ttnn SIGSEGV. Instead tools/bundle_ttnn_runtime_libs.py
+# copies missing .so (libtracy, libmpi, ...) into ttnn/build/lib. Platform tag is
+# retagged to manylinux_2_34_x86_64 after a green in-container smoke.
 
 on:
   workflow_dispatch:
@@ -93,15 +93,20 @@ jobs:
           # Pin checkout removed tools/ added on the release branch; restore from the dispatch ref.
           git checkout "${{ github.sha }}" -- \
             tools/repack_ttnn_shutov_wheel.py \
-            tools/retag_wheel_platform.py || true
+            tools/retag_wheel_platform.py \
+            tools/bundle_ttnn_runtime_libs.py || true
           if [ ! -f tools/repack_ttnn_shutov_wheel.py ]; then
             git show origin/main:tools/repack_ttnn_shutov_wheel.py > tools/repack_ttnn_shutov_wheel.py
           fi
           if [ ! -f tools/retag_wheel_platform.py ]; then
             git show origin/main:tools/retag_wheel_platform.py > tools/retag_wheel_platform.py
           fi
+          if [ ! -f tools/bundle_ttnn_runtime_libs.py ]; then
+            git show origin/main:tools/bundle_ttnn_runtime_libs.py > tools/bundle_ttnn_runtime_libs.py
+          fi
           test -f tools/repack_ttnn_shutov_wheel.py
           test -f tools/retag_wheel_platform.py
+          test -f tools/bundle_ttnn_runtime_libs.py
 
       - name: Free disk on runner
         run: |
@@ -140,8 +145,9 @@ jobs:
           CIBW_BUILD_FRONTEND: build
           CIBW_BUILD_TYPE: Release
           CIBW_ENABLE_TRACY: "OFF"
-          # Empty repair command: skip auditwheel. Repair on this pin corrupts ELF.
-          CIBW_REPAIR_WHEEL_COMMAND: ""
+          # NOT auditwheel (corrupts ELF on this pin). Copy missing .so into ttnn/build/lib.
+          CIBW_REPAIR_WHEEL_COMMAND: >-
+            python3 /project/tools/bundle_ttnn_runtime_libs.py {wheel} --dest-dir {dest_dir}
           CIBW_ENVIRONMENT: >-
             CMAKE_BUILD_PARALLEL_LEVEL=2
             NINJAFLAGS=-j2
