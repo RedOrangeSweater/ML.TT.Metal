@@ -160,14 +160,17 @@ jobs:
         run: |
           set -euxo pipefail
           SRC=$(ls -1 wheelhouse/ttnn-*.whl | head -n 1)
+          # Image default python3 is 3.9; wheel is cp310. Use manylinux CPython 3.10.
           docker run --rm \
             -v "$PWD/wheelhouse:/wheels:ro" \
             tt-metal-manylinux:ci \
             bash -lc "
               set -euxo pipefail
-              python3 -m pip install --upgrade pip
-              python3 -m pip install /wheels/$(basename "$SRC")
-              python3 -c 'import ttnn; print(\"MANYLINUX_SMOKE_OK\", ttnn.__file__)'
+              PY=/opt/python/cp310-cp310/bin/python
+              test -x \"\$PY\"
+              \"\$PY\" -m pip install --upgrade pip
+              \"\$PY\" -m pip install /wheels/$(basename "$SRC")
+              \"\$PY\" -c 'import ttnn; print(\"MANYLINUX_SMOKE_OK\", ttnn.__file__)'
             "
 
       - name: Repack as ttnn-shutov
