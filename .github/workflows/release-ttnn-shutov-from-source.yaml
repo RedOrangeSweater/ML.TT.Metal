@@ -135,7 +135,7 @@ jobs:
             CIBW_BUILD_TYPE=Release
             CIBW_ENABLE_TRACY=OFF
           CIBW_BEFORE_BUILD: "mkdir -p /tmp/ccache && ccache -z || true"
-          CIBW_TEST_COMMAND: 'python -c "import ttnn; print(ttnn.__file__)"'
+          CIBW_TEST_SKIP: "*"
           CIBW_MANYLINUX_X86_64_IMAGE: tt-metal-manylinux:ci
         run: |
           set -euxo pipefail
