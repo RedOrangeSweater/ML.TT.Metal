@@ -1,7 +1,7 @@
 name: "Release ttnn-shutov (from-source at Merge pin)"
 run-name: "ttnn-shutov from-source (${{ inputs.publish_target }})"
 
-# Build a manylinux ttnn wheel from this checkout (intended pin: 8dfb324099a),
+# Build a manylinux ttnn wheel from the Merge pin (default 8dfb324099a),
 # repack as ttnn-shutov, optionally publish. Default is artifact-only.
 #
 # Does NOT use Tenstorrent harbor / tt-ubuntu-* runners (unavailable on this fork).
@@ -24,6 +24,11 @@ on:
         required: true
         default: "0.65.0.dev20251204+g8dfb324099"
         type: string
+      metal_sha:
+        description: "tt-metal commit to build (Merge pin)"
+        required: true
+        default: "8dfb324099a1bf6b8839cffd5740e22a4d621385"
+        type: string
 
 permissions:
   contents: read
@@ -35,19 +40,41 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
-      - name: Checkout (full history for setuptools-scm / git describe)
+      - name: Checkout workflow tip (tools + history)
         uses: actions/checkout@v4
         with:
-          submodules: recursive
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Record pin
+      - name: Checkout Merge pin + submodules
         run: |
           set -euxo pipefail
+          git checkout "${{ inputs.metal_sha }}"
+          git submodule update --init --recursive
           echo "HEAD=$(git rev-parse HEAD)"
           git describe --tags --always
-          echo "Expected Merge pin: 8dfb324099a1bf6b8839cffd5740e22a4d621385"
+
+      - name: Cap OpenMPI make -j in Dockerfile.manylinux (OOM workaround)
+        run: |
+          set -euxo pipefail
+          # Full -j$(nproc) OOMs on GitHub-hosted / memory-limited builds.
+          if grep -q 'make -j\$(nproc)' dockerfile/Dockerfile.manylinux; then
+            sed -i 's/make -j\$(nproc)/make -j${OMPI_MAKE_JOBS:-2}/' dockerfile/Dockerfile.manylinux
+          fi
+          # Ensure ARG exists near OMPI section
+          if ! grep -q 'ARG OMPI_MAKE_JOBS' dockerfile/Dockerfile.manylinux; then
+            sed -i '/ARG OMPI_PREFIX=/a ARG OMPI_MAKE_JOBS=2' dockerfile/Dockerfile.manylinux || \
+              sed -i '1a ARG OMPI_MAKE_JOBS=2' dockerfile/Dockerfile.manylinux
+          fi
+          grep -n 'make -j\|OMPI_MAKE_JOBS' dockerfile/Dockerfile.manylinux | head -20
+
+      - name: Restore repack tool from workflow tip
+        run: |
+          set -euxo pipefail
+          # Pin checkout removed tools/ added on the release branch; restore from the dispatch ref.
+          git checkout "${{ github.sha }}" -- tools/repack_ttnn_shutov_wheel.py || \
+            git show origin/main:tools/repack_ttnn_shutov_wheel.py > tools/repack_ttnn_shutov_wheel.py
+          test -f tools/repack_ttnn_shutov_wheel.py
 
       - name: Free disk on runner
         run: |
@@ -63,6 +90,7 @@ jobs:
           set -euxo pipefail
           docker build \
             -f dockerfile/Dockerfile.manylinux \
+            --build-arg OMPI_MAKE_JOBS=2 \
             -t tt-metal-manylinux:ci \
             --progress=plain \
             .
@@ -122,7 +150,7 @@ jobs:
       - name: Upload ttnn-shutov artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ttnn-shutov-${{ inputs.publish_version }}
+          name: ttnn-shutov-distributions
           path: dist/
           if-no-files-found: error
 
