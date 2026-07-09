@@ -54,10 +54,10 @@ jobs:
           echo "HEAD=$(git rev-parse HEAD)"
           git describe --tags --always
 
-      - name: Cap OpenMPI make -j in Dockerfile.manylinux (OOM workaround)
+      - name: Harden Dockerfile.manylinux (OMPI -j + clang)
         run: |
           set -euxo pipefail
-          # Full -j$(nproc) OOMs on GitHub-hosted / memory-limited builds.
+          # Cap OpenMPI parallelism (OOM on GitHub-hosted / memory-limited builds).
           if grep -q 'make -j\$(nproc)' dockerfile/Dockerfile.manylinux; then
             sed -i 's/make -j\$(nproc)/make -j${OMPI_MAKE_JOBS:-2}/' dockerfile/Dockerfile.manylinux
           fi
@@ -66,7 +66,12 @@ jobs:
             sed -i '/ARG OMPI_PREFIX=/a ARG OMPI_MAKE_JOBS=2' dockerfile/Dockerfile.manylinux || \
               sed -i '1a ARG OMPI_MAKE_JOBS=2' dockerfile/Dockerfile.manylinux
           fi
-          grep -n 'make -j\|OMPI_MAKE_JOBS' dockerfile/Dockerfile.manylinux | head -20
+          # OpenMPI 5.0.7 fails with GCC 14+ (req_complete = false). Dockerfile sets
+          # CC=clang only AFTER the OMPI RUN; force clang for configure/make.
+          if ! grep -q 'CC=clang CXX=clang++ ./configure' dockerfile/Dockerfile.manylinux; then
+            sed -i 's|    ./configure \\|    CC=clang CXX=clang++ ./configure \\|' dockerfile/Dockerfile.manylinux
+          fi
+          grep -n 'make -j\|OMPI_MAKE_JOBS\|CC=clang\|configure' dockerfile/Dockerfile.manylinux | head -30
 
       - name: Restore repack tool from workflow tip
         run: |
