@@ -5,7 +5,10 @@ run-name: "ttnn-shutov from-source (${{ inputs.publish_target }})"
 # repack as ttnn-shutov, optionally publish. Default is artifact-only.
 #
 # Does NOT use Tenstorrent harbor / tt-ubuntu-* runners (unavailable on this fork).
-# Parity with local rehearsal: Dockerfile.manylinux + cibuildwheel cp310.
+# auditwheel repair is DISABLED: on this pin it corrupts ELF (.init/.plt in
+# non-exec LOAD) and import ttnn SIGSEGV. Build stays inside the manylinux
+# image; platform tag is retagged to manylinux_2_34_x86_64 after a green
+# in-container smoke (retag != auditwheel).
 
 on:
   workflow_dispatch:
@@ -84,13 +87,21 @@ jobs:
           python3 tools/patch_tracy_skip_tools.py
           grep -n "LOCAL_SKIP_TRACY_TOOLS\|endif() # ENABLE_TRACY" cmake/tracy.cmake | head
 
-      - name: Restore repack tool from workflow tip
+      - name: Restore packaging tools from workflow tip
         run: |
           set -euxo pipefail
           # Pin checkout removed tools/ added on the release branch; restore from the dispatch ref.
-          git checkout "${{ github.sha }}" -- tools/repack_ttnn_shutov_wheel.py || \
+          git checkout "${{ github.sha }}" -- \
+            tools/repack_ttnn_shutov_wheel.py \
+            tools/retag_wheel_platform.py || true
+          if [ ! -f tools/repack_ttnn_shutov_wheel.py ]; then
             git show origin/main:tools/repack_ttnn_shutov_wheel.py > tools/repack_ttnn_shutov_wheel.py
+          fi
+          if [ ! -f tools/retag_wheel_platform.py ]; then
+            git show origin/main:tools/retag_wheel_platform.py > tools/retag_wheel_platform.py
+          fi
           test -f tools/repack_ttnn_shutov_wheel.py
+          test -f tools/retag_wheel_platform.py
 
       - name: Free disk on runner
         run: |
@@ -122,13 +133,15 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install "cibuildwheel==2.23.2" twine wheel
 
-      - name: Build ttnn wheel (cibuildwheel cp310)
+      - name: Build ttnn wheel (cibuildwheel cp310, no auditwheel)
         env:
           CIBW_BUILD: "cp310-manylinux_x86_64*"
           CIBW_SKIP: "*-musllinux_*"
           CIBW_BUILD_FRONTEND: build
           CIBW_BUILD_TYPE: Release
           CIBW_ENABLE_TRACY: "OFF"
+          # Empty repair command: skip auditwheel. Repair on this pin corrupts ELF.
+          CIBW_REPAIR_WHEEL_COMMAND: ""
           CIBW_ENVIRONMENT: >-
             CMAKE_BUILD_PARALLEL_LEVEL=2
             NINJAFLAGS=-j2
@@ -137,10 +150,25 @@ jobs:
           CIBW_BEFORE_BUILD: "mkdir -p /tmp/ccache && ccache -z || true"
           CIBW_TEST_SKIP: "*"
           CIBW_MANYLINUX_X86_64_IMAGE: tt-metal-manylinux:ci
+          CIBW_CONTAINER_ENGINE: "docker; create_args: --memory=28g --memory-swap=40g --cpus=4"
         run: |
           set -euxo pipefail
           python3 -m cibuildwheel --platform linux
           ls -lh wheelhouse/
+
+      - name: Smoke import ttnn inside manylinux image
+        run: |
+          set -euxo pipefail
+          SRC=$(ls -1 wheelhouse/ttnn-*.whl | head -n 1)
+          docker run --rm \
+            -v "$PWD/wheelhouse:/wheels:ro" \
+            tt-metal-manylinux:ci \
+            bash -lc "
+              set -euxo pipefail
+              python3 -m pip install --upgrade pip
+              python3 -m pip install /wheels/$(basename "$SRC")
+              python3 -c 'import ttnn; print(\"MANYLINUX_SMOKE_OK\", ttnn.__file__)'
+            "
 
       - name: Repack as ttnn-shutov
         run: |
@@ -150,17 +178,19 @@ jobs:
             --source-wheel "${SRC}" \
             --skip-sha256-check \
             --publish-version "${{ inputs.publish_version }}" \
-            --output-dir dist
-          ls -lh dist/
+            --output-dir dist-raw
+          ls -lh dist-raw/
 
-      - name: Smoke import ttnn from repacked wheel
+      - name: Retag platform to manylinux_2_34_x86_64 (PyPI-accepted)
         run: |
           set -euxo pipefail
-          python3 -m venv /tmp/ttnn-shutov-smoke
-          source /tmp/ttnn-shutov-smoke/bin/activate
-          python3 -m pip install --upgrade pip
-          python3 -m pip install dist/ttnn_shutov-*.whl
-          python3 -c "import ttnn; print('TTNN REPACK OK:', ttnn.__file__)"
+          mkdir -p dist
+          SRC=$(ls -1 dist-raw/ttnn_shutov-*.whl | head -n 1)
+          python3 tools/retag_wheel_platform.py \
+            --input "${SRC}" \
+            --platform-tag manylinux_2_34_x86_64 \
+            --output-dir dist
+          ls -lh dist/
           python3 -m twine check dist/*.whl
 
       - name: Upload ttnn-shutov artifact
@@ -170,16 +200,44 @@ jobs:
           path: dist/
           if-no-files-found: error
 
+  publish-testpypi:
+    needs: build-repack
+    if: ${{ inputs.publish_target == 'testpypi' }}
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ttnn-shutov-distributions
+          path: dist/
       - name: Publish to TestPyPI
-        if: ${{ inputs.publish_target == 'testpypi' }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
           password: ${{ secrets.TESTPYPI_API_TOKEN }}
           packages-dir: dist/
+          skip-existing: true
 
+  publish-pypi:
+    needs: build-repack
+    if: ${{ inputs.publish_target == 'pypi' }}
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ttnn-shutov-distributions
+          path: dist/
       - name: Publish to PyPI
-        if: ${{ inputs.publish_target == 'pypi' }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
+          skip-existing: true
