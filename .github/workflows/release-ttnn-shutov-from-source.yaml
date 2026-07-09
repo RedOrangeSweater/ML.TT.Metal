@@ -156,6 +156,14 @@ jobs:
           python3 -m cibuildwheel --platform linux
           ls -lh wheelhouse/
 
+      - name: Upload unrepaired wheelhouse (keep on smoke failure)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ttnn-unrepaired-wheelhouse
+          path: wheelhouse/
+          if-no-files-found: error
+          retention-days: 5
+
       - name: Smoke import ttnn inside manylinux image
         run: |
           set -euxo pipefail
