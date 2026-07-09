@@ -65,6 +65,7 @@ RUN wget https://github.com/ccache/ccache/releases/download/v4.7/ccache-4.7.tar.
 # Build OpenMPI 5.0.7 with ULFM support from source
 ARG OMPI_TAG=v5.0.7
 ARG OMPI_PREFIX=/opt/openmpi-${OMPI_TAG}-ulfm
+ARG OMPI_MAKE_JOBS=2
 WORKDIR /tmp
 RUN git clone --branch ${OMPI_TAG} --depth 1 https://github.com/open-mpi/ompi.git ompi-src && \
     cd ompi-src && \
