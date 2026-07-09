@@ -73,6 +73,17 @@ jobs:
           fi
           grep -n 'make -j\|OMPI_MAKE_JOBS\|CC=clang\|configure' dockerfile/Dockerfile.manylinux | head -30
 
+      - name: Skip Tracy tools when ENABLE_TRACY=OFF
+        run: |
+          set -euxo pipefail
+          # Pin checkout may not have tools/; restore patcher from workflow tip first.
+          git checkout "${{ github.sha }}" -- tools/patch_tracy_skip_tools.py || true
+          if [ ! -f tools/patch_tracy_skip_tools.py ]; then
+            git show origin/main:tools/patch_tracy_skip_tools.py > tools/patch_tracy_skip_tools.py
+          fi
+          python3 tools/patch_tracy_skip_tools.py
+          grep -n "LOCAL_SKIP_TRACY_TOOLS\|endif() # ENABLE_TRACY" cmake/tracy.cmake | head
+
       - name: Restore repack tool from workflow tip
         run: |
           set -euxo pipefail
