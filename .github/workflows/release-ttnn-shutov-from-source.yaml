@@ -5,10 +5,13 @@ run-name: "ttnn-shutov from-source (${{ inputs.publish_target }})"
 # repack as ttnn-shutov, optionally publish. Default is artifact-only.
 #
 # Does NOT use Tenstorrent harbor / tt-ubuntu-* runners (unavailable on this fork).
-# auditwheel repair is DISABLED: on this pin it corrupts ELF (.init/.plt in
-# non-exec LOAD) and import ttnn SIGSEGV. Instead tools/bundle_ttnn_runtime_libs.py
-# copies missing .so (libtracy, libmpi, ...) into ttnn/build/lib. Platform tag is
-# retagged to manylinux_2_34_x86_64 after a green in-container smoke.
+# auditwheel AND patchelf are DISABLED: on this pin both corrupt ELF (.init/.plt
+# leave the executable LOAD) and import ttnn SIGSEGV (see Actions runs
+# 29038178511 / 29046417280). tools/bundle_ttnn_runtime_libs.py is copy-only:
+# it adds libtracy.so.0.10.0 under ttnn/build/lib and leaves every pre-existing
+# ELF byte-identical. OpenMPI/hwloc stay as system/image runtime deps
+# (/opt/openmpi-v5.0.7-ulfm). Platform tag is retagged to manylinux_2_34_x86_64
+# after a green in-container smoke + ELF invariant gate.
 
 on:
   workflow_dispatch:
@@ -94,7 +97,8 @@ jobs:
           git checkout "${{ github.sha }}" -- \
             tools/repack_ttnn_shutov_wheel.py \
             tools/retag_wheel_platform.py \
-            tools/bundle_ttnn_runtime_libs.py || true
+            tools/bundle_ttnn_runtime_libs.py \
+            tools/check_ttnn_elf_invariant.py || true
           if [ ! -f tools/repack_ttnn_shutov_wheel.py ]; then
             git show origin/main:tools/repack_ttnn_shutov_wheel.py > tools/repack_ttnn_shutov_wheel.py
           fi
@@ -104,9 +108,13 @@ jobs:
           if [ ! -f tools/bundle_ttnn_runtime_libs.py ]; then
             git show origin/main:tools/bundle_ttnn_runtime_libs.py > tools/bundle_ttnn_runtime_libs.py
           fi
+          if [ ! -f tools/check_ttnn_elf_invariant.py ]; then
+            git show origin/main:tools/check_ttnn_elf_invariant.py > tools/check_ttnn_elf_invariant.py
+          fi
           test -f tools/repack_ttnn_shutov_wheel.py
           test -f tools/retag_wheel_platform.py
           test -f tools/bundle_ttnn_runtime_libs.py
+          test -f tools/check_ttnn_elf_invariant.py
 
       - name: Free disk on runner
         run: |
@@ -145,8 +153,10 @@ jobs:
           CIBW_BUILD_FRONTEND: build
           CIBW_BUILD_TYPE: Release
           CIBW_ENABLE_TRACY: "OFF"
-          # NOT auditwheel (corrupts ELF on this pin). Copy missing .so into ttnn/build/lib.
+          # Copy-only tracy repair (no auditwheel, no patchelf). Preserve raw wheel for ELF gate.
           CIBW_REPAIR_WHEEL_COMMAND: >-
+            mkdir -p /project/wheelhouse-raw &&
+            cp {wheel} /project/wheelhouse-raw/ &&
             python3 /project/tools/bundle_ttnn_runtime_libs.py {wheel} --dest-dir {dest_dir}
           CIBW_ENVIRONMENT: >-
             CMAKE_BUILD_PARALLEL_LEVEL=2
@@ -159,13 +169,31 @@ jobs:
           CIBW_CONTAINER_ENGINE: "docker; create_args: --memory=28g --memory-swap=40g --cpus=4"
         run: |
           set -euxo pipefail
+          mkdir -p wheelhouse-raw
           python3 -m cibuildwheel --platform linux
-          ls -lh wheelhouse/
+          ls -lh wheelhouse/ wheelhouse-raw/
 
-      - name: Upload unrepaired wheelhouse (keep on smoke failure)
+      - name: Upload raw wheelhouse (pre-repair, keep on smoke failure)
         uses: actions/upload-artifact@v4
         with:
-          name: ttnn-unrepaired-wheelhouse
+          name: ttnn-raw-wheelhouse
+          path: wheelhouse-raw/
+          if-no-files-found: error
+          retention-days: 5
+
+      - name: ELF invariant (raw vs repaired)
+        run: |
+          set -euxo pipefail
+          RAW=$(ls -1 wheelhouse-raw/ttnn-*.whl | head -n 1)
+          REP=$(ls -1 wheelhouse/ttnn-*.whl | head -n 1)
+          python3 tools/check_ttnn_elf_invariant.py \
+            --raw-wheel "${RAW}" \
+            --repaired-wheel "${REP}"
+
+      - name: Upload repaired wheelhouse (pre-repack)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ttnn-repaired-wheelhouse
           path: wheelhouse/
           if-no-files-found: error
           retention-days: 5
@@ -175,13 +203,16 @@ jobs:
           set -euxo pipefail
           SRC=$(ls -1 wheelhouse/ttnn-*.whl | head -n 1)
           # Image default python3 is 3.9; wheel is cp310. Use manylinux CPython 3.10.
+          # OpenMPI 5 ULFM from the image (apt OpenMPI 4 lacks MPIX_Comm_revoke).
           docker run --rm \
             -v "$PWD/wheelhouse:/wheels:ro" \
+            -e LD_LIBRARY_PATH=/opt/openmpi-v5.0.7-ulfm/lib \
             tt-metal-manylinux:ci \
             bash -lc "
               set -euxo pipefail
               PY=/opt/python/cp310-cp310/bin/python
               test -x \"\$PY\"
+              test -e /opt/openmpi-v5.0.7-ulfm/lib/libmpi.so.40
               \"\$PY\" -m pip install --upgrade pip
               \"\$PY\" -m pip install /wheels/$(basename "$SRC")
               \"\$PY\" -c 'import ttnn; print(\"MANYLINUX_SMOKE_OK\", ttnn.__file__)'
