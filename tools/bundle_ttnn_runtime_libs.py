@@ -1,95 +1,81 @@
 #!/usr/bin/env python3
-"""Bundle runtime .so files into an unrepaired ttnn wheel (no auditwheel).
+"""Copy-only repair for unrepaired ttnn wheels (no auditwheel, no patchelf).
 
-auditwheel repair on pin 8dfb324 corrupts ELF. This script only *copies*
-missing shared libraries next to the already-packaged libs under
-ttnn/build/lib (RUNPATH already includes $ORIGIN) and optionally rewrites
-RPATH to $ORIGIN with patchelf — without relocating sections the way
-auditwheel does.
+On pin 8dfb324 the unrepaired cibuildwheel output is missing only
+libtracy.so.0.10.0 under ttnn/build/lib. OpenMPI/hwloc stay as system
+runtime deps (install via apt / image OpenMPI prefix).
 
-Intended as CIBW_REPAIR_WHEEL_COMMAND inside the manylinux build container,
-where /project/build_Release/lib and OpenMPI prefix still exist.
+patchelf --set-rpath on this pin corrupts ELF (.init/.plt leave the
+executable LOAD) and import ttnn SIGSEGV. This script therefore:
+
+1. Copies libtracy.so.0.10.0 (+ libtracy.so symlink) into ttnn/build/lib
+2. Leaves every pre-existing ELF byte-identical (SHA256 checked)
+3. Rebuilds RECORD and writes the repaired wheel
+
+Intended as CIBW_REPAIR_WHEEL_COMMAND inside the manylinux build
+container, where /project/build_Release/lib{,64} still exist.
 """
 
 from __future__ import annotations
 
 import argparse
-import os
+import base64
+import hashlib
 import shutil
-import subprocess
 import sys
 import tempfile
 import zipfile
 from pathlib import Path
 
-
-def _needed(so: Path) -> list[str]:
-    out = subprocess.check_output(["readelf", "-d", str(so)], text=True)
-    names: list[str] = []
-    for line in out.splitlines():
-        if "NEEDED" in line and "[" in line:
-            names.append(line.split("[", 1)[1].split("]", 1)[0])
-    return names
+TRACY_SONAME = "libtracy.so.0.10.0"
+TRACY_LINK = "libtracy.so"
 
 
-def _find_lib(name: str, search_dirs: list[Path]) -> Path | None:
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    h.update(path.read_bytes())
+    return h.hexdigest()
+
+
+def _find_tracy(search_dirs: list[Path]) -> Path:
     for d in search_dirs:
         if not d.is_dir():
             continue
-        exact = d / name
-        if exact.is_file():
-            return exact
-        # SONAME may be a symlink target; also try prefix match
-        matches = sorted(d.glob(name + "*"))
-        for m in matches:
-            if m.is_file() or m.is_symlink():
-                return m
-    return None
-
-
-def _copy_lib(src: Path, dest_dir: Path) -> None:
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    # Copy real file + preserve soname symlink if src is symlink
-    if src.is_symlink():
-        target = src.resolve()
-        dest_real = dest_dir / target.name
-        if not dest_real.exists():
-            shutil.copy2(target, dest_real)
-        link = dest_dir / src.name
-        if link.exists() or link.is_symlink():
-            link.unlink()
-        link.symlink_to(dest_real.name)
-    else:
-        dest = dest_dir / src.name
-        if not dest.exists():
-            shutil.copy2(src, dest)
-        # Also create SONAME symlink if readelf reports one different from filename
-        try:
-            out = subprocess.check_output(["readelf", "-d", str(src)], text=True)
-            for line in out.splitlines():
-                if "SONAME" in line and "[" in line:
-                    soname = line.split("[", 1)[1].split("]", 1)[0]
-                    if soname != src.name:
-                        link = dest_dir / soname
-                        if not link.exists() and not link.is_symlink():
-                            link.symlink_to(src.name)
-        except subprocess.CalledProcessError:
-            pass
-
-
-def _set_rpath_origin(so: Path) -> None:
-    if shutil.which("patchelf") is None:
-        return
-    # Only rewrite RPATH/RUNPATH; do not --force-rpath relocate sections.
-    subprocess.check_call(
-        ["patchelf", "--set-rpath", "$ORIGIN", str(so)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        candidate = d / TRACY_SONAME
+        if candidate.is_file():
+            return candidate.resolve()
+        # Sometimes only the unversioned symlink exists
+        link = d / TRACY_LINK
+        if link.is_file() or link.is_symlink():
+            return link.resolve()
+    raise FileNotFoundError(
+        f"{TRACY_SONAME} not found in: " + ", ".join(str(p) for p in search_dirs)
     )
 
 
-def bundle(wheel: Path, dest_dir: Path, search_dirs: list[Path]) -> Path:
+def _rewrite_record(work: Path) -> None:
+    dist_infos = list(work.glob("*.dist-info"))
+    if len(dist_infos) != 1:
+        raise SystemExit(f"expected one .dist-info, found {dist_infos}")
+    di = dist_infos[0]
+    files = [p for p in work.rglob("*") if p.is_file() and p.name != "RECORD"]
+    lines: list[str] = []
+    for p in sorted(files, key=lambda x: str(x.relative_to(work))):
+        data = p.read_bytes()
+        digest = (
+            base64.urlsafe_b64encode(hashlib.sha256(data).digest())
+            .rstrip(b"=")
+            .decode()
+        )
+        lines.append(f"{p.relative_to(work).as_posix()},sha256={digest},{len(data)}")
+    lines.append(f"{di.relative_to(work).as_posix()}/RECORD,,")
+    (di / "RECORD").write_text("\n".join(lines) + "\n")
+
+
+def repair(wheel: Path, dest_dir: Path, search_dirs: list[Path]) -> Path:
     dest_dir.mkdir(parents=True, exist_ok=True)
+    tracy_src = _find_tracy(search_dirs)
+
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp) / "work"
         work.mkdir()
@@ -100,47 +86,53 @@ def bundle(wheel: Path, dest_dir: Path, search_dirs: list[Path]) -> Path:
         if not lib_dir.is_dir():
             raise SystemExit(f"missing {lib_dir} inside wheel")
 
-        # Seed queue from packaged .so NEEDED lists
-        queue: list[str] = []
-        for so in list(lib_dir.glob("*.so")) + list(work.glob("ttnn/_ttnn*.so")):
-            queue.extend(_needed(so))
+        # Snapshot SHA256 of every pre-existing file under ttnn/build/lib
+        before: dict[str, str] = {}
+        for p in lib_dir.rglob("*"):
+            if p.is_file() and not p.is_symlink():
+                before[p.relative_to(work).as_posix()] = _sha256(p)
 
-        seen: set[str] = set()
-        bundled: list[str] = []
-        while queue:
-            name = queue.pop(0)
-            if name in seen:
-                continue
-            seen.add(name)
-            # Skip glibc / compiler runtime — provided by manylinux / host
-            if name.startswith(("libc.so", "libm.so", "libdl.so", "librt.so", "libpthread.so", "ld-linux", "libgcc_s", "libstdc++")):
-                continue
-            if (lib_dir / name).exists() or any(lib_dir.glob(name + "*")):
-                continue
-            src = _find_lib(name, search_dirs)
-            if src is None:
-                print(f"WARN: could not find {name}", file=sys.stderr)
-                continue
-            _copy_lib(src, lib_dir)
-            bundled.append(src.name)
-            # Recurse into newly copied lib
-            real = (lib_dir / src.resolve().name) if src.is_symlink() else (lib_dir / src.name)
-            if real.is_file():
-                queue.extend(_needed(real))
+        # Also snapshot the extension module
+        for p in (work / "ttnn").glob("_ttnn*.so"):
+            before[p.relative_to(work).as_posix()] = _sha256(p)
 
-        # Fix absolute RUNPATHs on bundled project libs so $ORIGIN wins after install
-        for so in lib_dir.glob("*.so*"):
-            if so.is_symlink() or not so.is_file():
-                continue
-            if so.name.startswith(("libtt_", "libdevice", "libtracy", "_ttnn", "libmpi", "libopen-", "libpmix", "libhwloc", "libnuma", "libevent")):
-                _set_rpath_origin(so)
+        dest_tracy = lib_dir / TRACY_SONAME
+        if dest_tracy.exists() or dest_tracy.is_symlink():
+            raise SystemExit(
+                f"{TRACY_SONAME} already present; refusing to overwrite "
+                "(would hide a packaging bug)"
+            )
+        shutil.copy2(tracy_src, dest_tracy)
+
+        link = lib_dir / TRACY_LINK
+        if link.exists() or link.is_symlink():
+            link.unlink()
+        link.symlink_to(TRACY_SONAME)
+
+        # Invariant: every previously present ELF is byte-identical
+        for rel, expected in before.items():
+            actual = _sha256(work / rel)
+            if actual != expected:
+                raise SystemExit(
+                    f"ELF invariant violated for {rel}: "
+                    f"before={expected} after={actual}"
+                )
+
+        _rewrite_record(work)
 
         out = dest_dir / wheel.name
         with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
             for p in sorted(work.rglob("*")):
-                if p.is_file():
-                    zf.write(p, p.relative_to(work).as_posix())
-        print(f"bundled={bundled}")
+                if p.is_file() or p.is_symlink():
+                    # zipfile follows symlinks by default when writing file content;
+                    # write symlink members as the target file content under the
+                    # symlink name is wrong for SONAME resolution — store the
+                    # real tracy once and a second member for the link name that
+                    # is also the real bytes (pip/zip on Linux extracts both as
+                    # files; ld.so resolves via SONAME filename).
+                    zf.write(p.resolve() if p.is_symlink() else p, p.relative_to(work).as_posix())
+        print(f"copied_tracy={tracy_src}")
+        print(f"invariant_checked={len(before)}")
         print(out)
         return out
 
@@ -153,21 +145,18 @@ def main() -> int:
         "--search-dir",
         action="append",
         default=[],
-        help="Directory to search for missing .so (repeatable)",
+        help="Directory to search for libtracy (repeatable)",
     )
     args = ap.parse_args()
 
     defaults = [
         Path("/project/build_Release/lib"),
         Path("/project/build_Release/lib64"),
-        Path("/opt/openmpi-v5.0.7-ulfm/lib"),
-        Path("/usr/lib64"),
-        Path("/usr/lib"),
-        Path("/lib64"),
-        Path("/lib"),
+        Path("/project/build/lib"),
+        Path("/project/build/lib64"),
     ]
     search = [Path(p) for p in args.search_dir] + defaults
-    bundle(Path(args.wheel), Path(args.dest_dir), search)
+    repair(Path(args.wheel), Path(args.dest_dir), search)
     return 0
 
 
