@@ -153,10 +153,10 @@ jobs:
           CIBW_BUILD_FRONTEND: build
           CIBW_BUILD_TYPE: Release
           CIBW_ENABLE_TRACY: "OFF"
-          # Copy-only tracy repair (no auditwheel, no patchelf). Preserve raw wheel for ELF gate.
+          # Copy-only tracy repair (no auditwheel, no patchelf).
+          # Bundler also writes UNREPAIRED.<wheel> into {dest_dir}; cibuildwheel
+          # only persists {dest_dir}/*.whl via /output (not /project writes).
           CIBW_REPAIR_WHEEL_COMMAND: >-
-            mkdir -p /project/wheelhouse-raw &&
-            cp {wheel} /project/wheelhouse-raw/ &&
             python3 /project/tools/bundle_ttnn_runtime_libs.py {wheel} --dest-dir {dest_dir}
           CIBW_ENVIRONMENT: >-
             CMAKE_BUILD_PARALLEL_LEVEL=2
@@ -169,9 +169,17 @@ jobs:
           CIBW_CONTAINER_ENGINE: "docker; create_args: --memory=28g --memory-swap=40g --cpus=4"
         run: |
           set -euxo pipefail
-          mkdir -p wheelhouse-raw
           python3 -m cibuildwheel --platform linux
+          mkdir -p wheelhouse-raw
+          # Split unrepaired twin (for ELF gate) from repaired wheelhouse.
+          for f in wheelhouse/UNREPAIRED.*.whl; do
+            test -f "$f"
+            base=$(basename "$f")
+            mv "$f" "wheelhouse-raw/${base#UNREPAIRED.}"
+          done
           ls -lh wheelhouse/ wheelhouse-raw/
+          test -n "$(ls -1 wheelhouse/ttnn-*.whl | head -n 1)"
+          test -n "$(ls -1 wheelhouse-raw/ttnn-*.whl | head -n 1)"
 
       - name: Upload raw wheelhouse (pre-repair, keep on smoke failure)
         uses: actions/upload-artifact@v4

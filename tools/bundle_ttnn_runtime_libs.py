@@ -76,6 +76,13 @@ def repair(wheel: Path, dest_dir: Path, search_dirs: list[Path]) -> Path:
     dest_dir.mkdir(parents=True, exist_ok=True)
     tracy_src = _find_tracy(search_dirs)
 
+    # cibuildwheel only copies *.whl from {dest_dir} back to the host via
+    # /output. Writes under /project do NOT persist. Keep an unrepaired twin
+    # next to the repaired wheel so CI can run the ELF invariant gate.
+    raw_out = dest_dir / f"UNREPAIRED.{wheel.name}"
+    shutil.copy2(wheel, raw_out)
+    print(f"saved_unrepaired={raw_out}")
+
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp) / "work"
         work.mkdir()
