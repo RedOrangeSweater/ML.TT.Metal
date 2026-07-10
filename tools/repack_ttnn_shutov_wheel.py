@@ -16,10 +16,11 @@ import tempfile
 from pathlib import Path
 
 DEFAULT_SOURCE_VERSION = "0.62.0.dev20250916"
-DEFAULT_PUBLISH_VERSION = "0.65.0.dev20251204+g8dfb324099"
+DEFAULT_PUBLISH_VERSION = "0.65.0.dev20251204"
 DEFAULT_SHA256 = "d68ddb1fd83f558f43b908c10094ebe016664646da9d795844de07a15aedbf09"
 DEFAULT_WHEEL = f"ttnn-{DEFAULT_SOURCE_VERSION}-cp310-cp310-manylinux_2_34_x86_64.whl"
 DEFAULT_URL = f"https://pypi.eng.aws.tenstorrent.com/ttnn/{DEFAULT_WHEEL}"
+DEFAULT_METAL_PIN = "8dfb324099a1bf6b8839cffd5740e22a4d621385"
 
 
 def provenance(source_version: str, publish_version: str) -> str:
@@ -28,7 +29,9 @@ def provenance(source_version: str, publish_version: str) -> str:
         suffix_note = f" Published as {publish_version} (metadata bump; binary from source {source_version})."
     return (
         "Provenance build: repackaged from tt-metal ttnn "
-        f"{source_version} (Apache-2.0). Import package remains ttnn.{suffix_note}"
+        f"{source_version} (Apache-2.0). Import package remains ttnn."
+        f" Metal pin {DEFAULT_METAL_PIN}.{suffix_note}"
+        " Public indexes reject PEP 440 local versions (+g...); pin SHA is recorded here."
     )
 
 
