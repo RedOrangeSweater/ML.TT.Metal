@@ -1,4 +1,4 @@
-# Discussions package — tt-metal layernorm revert / UB
+# Discussions package - tt-metal layernorm revert / UB
 
 | File | Role |
 | --- | --- |

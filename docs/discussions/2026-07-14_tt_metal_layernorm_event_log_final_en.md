@@ -1,7 +1,7 @@
 # Event log: silent bundled revert of merged TMP migration `#33725`, and union type-punning UB handling
 
 **Repo:** personal fork discussion mirror of public `tenstorrent/tt-metal` history  
-**Style:** FRAME-2 — observable public GitHub facts + open hypotheses. No motive asserted as fact.
+**Style:** FRAME-2 - observable public GitHub facts + open hypotheses. No motive asserted as fact.
 
 ---
 
@@ -9,9 +9,9 @@
 
 I landed an approved TMP infrastructure migration for distributed LayerNorm post-all-gather ([#33725](https://github.com/tenstorrent/tt-metal/pull/33725), merged **2025-12-17**). Before merge I **held the PR on request** so the models team could land Welford work ([#31702](https://github.com/tenstorrent/tt-metal/pull/31702)), then **rebased myself** after that work was hang-reverted ([#34435](https://github.com/tenstorrent/tt-metal/pull/34435)).
 
-Sixteen days later, a 46-file New-Year integration PR ([#35146](https://github.com/tenstorrent/tt-metal/pull/35146), merged **2026-01-02**) titled around fixing a hang in **`#31702`** also **reverted `#33725`**, re-landed Welford, and redid the migration — **without an explanatory comment on the `#33725` thread**.
+Sixteen days later, a 46-file New-Year integration PR ([#35146](https://github.com/tenstorrent/tt-metal/pull/35146), merged **2026-01-02**) titled around fixing a hang in **`#31702`** also **reverted `#33725`**, re-landed Welford, and redid the migration - **without an explanatory comment on the `#33725` thread**.
 
-Separately: a reviewer flagged union type-punning as UB on `#33725`; I fixed it the same day with `std::bit_cast` and searched the tree for more copies; a lead asked to remove the pattern “everywhere”. `#35146` reintroduced union packing on the merge commit, with **no human UB discussion** on that PR — while a similar helper on `#31702` had been deferred to a “subsequent PR”.
+Separately: a reviewer flagged union type-punning as UB on `#33725`; I fixed it the same day with `std::bit_cast` and searched the tree for more copies; a lead asked to remove the pattern “everywhere”. `#35146` reintroduced union packing on the merge commit, with **no human UB discussion** on that PR - while a similar helper on `#31702` had been deferred to a “subsequent PR”.
 
 ---
 
@@ -19,15 +19,15 @@ Separately: a reviewer flagged union type-punning as UB on `#33725`; I fixed it 
 
 ### 1.1 Scope
 
-- **2025-12-03:** opened [#33725](https://github.com/tenstorrent/tt-metal/pull/33725) — migrate `layernorm_post_all_gather` to the TMP device-op infra per `DEVICE_OPERATION_MIGRATION_GUIDE.md` (ticket `#32693`). Structural migration / registered prim — **not** the Welford algorithm and **not** the Llama hang fix.
+- **2025-12-03:** opened [#33725](https://github.com/tenstorrent/tt-metal/pull/33725) - migrate `layernorm_post_all_gather` to the TMP device-op infra per `DEVICE_OPERATION_MIGRATION_GUIDE.md` (ticket `#32693`). Structural migration / registered prim - **not** the Welford algorithm and **not** the Llama hang fix.
 
-### 1.2 Reviewer finds UB — author response
+### 1.2 Reviewer finds UB - author response
 
-1. **2025-12-04** — `vtsilytskyiTT` flags union type-punning as undefined behavior and cites C++ §9.5 Unions:  
+1. **2025-12-04** - `vtsilytskyiTT` flags union type-punning as undefined behavior and cites C++ §9.5 Unions:  
    https://github.com/tenstorrent/tt-metal/pull/33725#discussion_r2589099451
 2. I acknowledged the historical blame lineage (the pattern predated the migration) and fixed it **the same day**:  
-   [`d7aab0e`](https://github.com/tenstorrent/tt-metal/commit/d7aab0e40c414735a2a8a8604d3a2a0f5d05f8ca) — replace `union { float f; uint32_t u; }` with `std::bit_cast<uint32_t>(…)`.
-3. I reported a codebase search finding **many** other `union {` sites — i.e. I did not stop at the single flagged line.
+   [`d7aab0e`](https://github.com/tenstorrent/tt-metal/commit/d7aab0e40c414735a2a8a8604d3a2a0f5d05f8ca) - replace `union { float f; uint32_t u; }` with `std::bit_cast<uint32_t>(…)`.
+3. I reported a codebase search finding **many** other `union {` sites - i.e. I did not stop at the single flagged line.
 4. `rmillerTT` asked to convert away from this UB **everywhere**:  
    https://github.com/tenstorrent/tt-metal/pull/33725#discussion_r2590254836
 
@@ -44,7 +44,7 @@ That sequence is the team-play part: accept the standard cite, fix same-day, wid
   https://github.com/tenstorrent/tt-metal/pull/33725#issuecomment-3637602359  
   I held an already-approved PR.
 - `#31702` merged, then [#34435](https://github.com/tenstorrent/tt-metal/pull/34435) reverted it due to a hang in Llama3.3-70b prefill (stated in the revert PR; locally bisected there).
-- **2025-12-15–16:** I undid the temporary models rebase, then **rebased onto main after `#34435`** and re-ran checks:  
+- **2025-12-15-16:** I undid the temporary models rebase, then **rebased onto main after `#34435`** and re-ran checks:  
   https://github.com/tenstorrent/tt-metal/pull/33725#issuecomment-3661476335
 - **2025-12-17:** `#33725` merged as [`31d6c64`](https://github.com/tenstorrent/tt-metal/commit/31d6c645c21f49ed1bb972e4315fda5e55e776fe).
 
@@ -71,7 +71,7 @@ Body rationale (paraphrase of public text): redo the op migration so Welford’s
 ### Process gap
 
 - There is **no** post-merge human comment on `#33725` explaining the revert to the author. Human issue comments on `#33725` stop at the **2025-12-16** rebase note; later activity is reference events.
-- Timing: merge on **2026-01-02** — holiday / vacation window for many teams (calendar exports are not attached here; treat holiday staffing as context, not as a proven motive).
+- Timing: merge on **2026-01-02** - holiday / vacation window for many teams (calendar exports are not attached here; treat holiday staffing as context, not as a proven motive).
 
 ### Parallel remediation asymmetry
 
@@ -91,7 +91,7 @@ Body rationale (paraphrase of public text): redo the op migration so Welford’s
 | Flag | Immediate + standard cite | On `#31702`: maybe fix in a “subsequent PR”? |
 | Fix | Same-day `std::bit_cast` | `#31702` merged with union `_bit_cast_` helper |
 | Aftermath | Host `bit_cast` fix reverted at `#35146` merge | Host `union` eps packing + kernel `_bit_cast_` union helper present at merge |
-| Human UB talk on `#35146` | — | **None** found in public review/issue comments |
+| Human UB talk on `#35146` | - | **None** found in public review/issue comments |
 
 The same union idiom also appears in earlier merged normalization work by the same author (`#20212`, `#30029`, …).
 
@@ -106,7 +106,7 @@ The same union idiom also appears in earlier merged normalization work by the sa
 **Observable mechanism:**
 
 - `#35146` **deletes** the TMP subtree introduced by `#33725` and recreates factories on a different path.
-- The project was in a broad wave of TMP / registration-style migrations across many ops. Review attention on such waves typically focuses on registration shape, accidental `&` / `const`, and preserving important logging — not a deep historical audit of every type-pun.
+- The project was in a broad wave of TMP / registration-style migrations across many ops. Review attention on such waves typically focuses on registration shape, accidental `&` / `const`, and preserving important logging - not a deep historical audit of every type-pun.
 
 **Effect:** naive `git blame` on current paths naturally attributes lines to later redo authors. That is a provenance-loss **mechanism**, not evidence of a plan to hide UB behind many different people.
 

@@ -1,4 +1,4 @@
-# Evidence manifest — tt-metal layernorm revert / UB event log
+# Evidence manifest - tt-metal layernorm revert / UB event log
 
 **Branch:** `discussion/10-layernorm-revert.dev`  
 **Target Discussion:** `shutovilyaep/tt-metal`  
