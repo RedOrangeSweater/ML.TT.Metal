@@ -194,9 +194,12 @@ jobs:
           set -euxo pipefail
           RAW=$(ls -1 wheelhouse-raw/ttnn-*.whl | head -n 1)
           REP=$(ls -1 wheelhouse/ttnn-*.whl | head -n 1)
+          # Allow newly bundled runtime libs under ttnn/build/lib (OpenMPI closure
+          # + libtracy); pre-existing ELFs must still stay byte-identical.
           python3 tools/check_ttnn_elf_invariant.py \
             --raw-wheel "${RAW}" \
-            --repaired-wheel "${REP}"
+            --repaired-wheel "${REP}" \
+            --allow-added-prefix "ttnn/build/lib/"
 
       - name: Upload repaired wheelhouse (pre-repack)
         uses: actions/upload-artifact@v4
