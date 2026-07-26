@@ -16,8 +16,14 @@ pure *copy* repair and relies on the RUNPATH already baked into the project libs
 1. Copies libtracy.so.0.10.0 (+ libtracy.so symlink) into ttnn/build/lib
 2. Copies the recursive NEEDED closure (OpenMPI + deps) into ttnn/build/lib,
    skipping glibc / compiler runtime provided by the manylinux host
-3. Leaves every pre-existing ELF byte-identical (SHA256 checked)
-4. Rebuilds RECORD and writes the repaired wheel
+3. Injects a tiny RTLD_GLOBAL pre-loader into ttnn/__init__.py so the bundled
+   OpenMPI closure resolves without env vars. The copied OpenMPI libs keep their
+   absolute build-time RUNPATH (patchelf --set-rpath corrupts them -> SIGSEGV),
+   so libmpi cannot find its siblings via $ORIGIN. dlopen()-ing the closure by
+   absolute path in dependency order puts every soname into the process, and
+   libtt_metal's NEEDED entries are then satisfied from the already-loaded libs.
+4. Leaves every pre-existing ELF byte-identical (SHA256 checked)
+5. Rebuilds RECORD and writes the repaired wheel
 
 Intended as CIBW_REPAIR_WHEEL_COMMAND inside the manylinux build container,
 where /project/build_Release/lib{,64} and /opt/openmpi-v5.0.7-ulfm/lib exist.
@@ -173,6 +179,64 @@ def _bundle_closure(work: Path, lib_dir: Path, search_dirs: list[Path]) -> list[
     return bundled
 
 
+PRELOAD_MARKER = "ttnn-shutov: preload bundled runtime libs"
+
+# dlopen order: leaf deps first so each CDLL resolves against already-loaded libs.
+PRELOAD_BLOCK = '''
+# --- ttnn-shutov: preload bundled runtime libs so the wheel is self-contained ---
+# The OpenMPI ULFM closure bundled under build/lib carries absolute build-time
+# RUNPATHs and cannot be patched (patchelf --set-rpath corrupts these ELFs ->
+# SIGSEGV), so we dlopen them by absolute path with RTLD_GLOBAL in dependency
+# order. Once resolved into the process, libtt_metal's NEEDED entries are
+# satisfied from the already-loaded libs without any environment variables.
+def _ttnn_preload_bundled_libs() -> None:
+    import ctypes
+    import os as _os
+
+    _lib_dir = _os.path.join(_os.path.dirname(__file__), "build", "lib")
+    if not _os.path.isdir(_lib_dir):
+        return
+    for _name in (
+        "libnuma.so.1",
+        "libz.so.1",
+        "libatomic.so.1",
+        "libevent_core-2.1.so.7",
+        "libevent_pthreads-2.1.so.7",
+        "libhwloc.so.15",
+        "libpmix.so.2",
+        "libopen-pal.so.80",
+        "libmpi.so.40",
+    ):
+        _path = _os.path.join(_lib_dir, _name)
+        if _os.path.exists(_path):
+            try:
+                ctypes.CDLL(_path, mode=ctypes.RTLD_GLOBAL)
+            except OSError:
+                pass
+
+
+_ttnn_preload_bundled_libs()
+# --- end ttnn-shutov preload ---
+'''
+
+
+def _inject_preloader(work: Path) -> None:
+    """Prepend the RTLD_GLOBAL pre-loader before ``import ttnn._ttnn`` so the
+    bundled OpenMPI closure resolves at import time without env vars."""
+    init_py = work / "ttnn" / "__init__.py"
+    if not init_py.is_file():
+        raise SystemExit(f"missing {init_py} inside wheel")
+    text = init_py.read_text()
+    if PRELOAD_MARKER in text:
+        return  # idempotent
+    needle = "import ttnn._ttnn"
+    idx = text.find(needle)
+    if idx == -1:
+        raise SystemExit(f"could not find '{needle}' in {init_py}")
+    patched = text[:idx] + PRELOAD_BLOCK.lstrip("\n") + "\n" + text[idx:]
+    init_py.write_text(patched)
+
+
 def _rewrite_record(work: Path) -> None:
     dist_infos = list(work.glob("*.dist-info"))
     if len(dist_infos) != 1:
@@ -237,8 +301,13 @@ def repair(wheel: Path, dest_dir: Path, search_dirs: list[Path]) -> Path:
         link.symlink_to(TRACY_SONAME)
 
         # Copy the recursive NEEDED closure (OpenMPI ULFM + deps) next to the
-        # project libs. Pure copy; RUNPATH ($ORIGIN) already resolves them.
+        # project libs. Pure copy; no RPATH/RUNPATH rewrite.
         bundled = _bundle_closure(work, lib_dir, search_dirs)
+
+        # Inject the RTLD_GLOBAL pre-loader so the copied OpenMPI closure (whose
+        # RUNPATH still points at the absolute build path) resolves at import
+        # time without LD_LIBRARY_PATH / LD_PRELOAD / TT_METAL_HOME.
+        _inject_preloader(work)
 
         # Invariant: every previously present ELF is byte-identical (we only add
         # new files, never rewrite existing ones -> no SIGSEGV-inducing ELF edit)
